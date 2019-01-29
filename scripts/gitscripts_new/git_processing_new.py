@@ -29,6 +29,12 @@ def get_file_lines(path):
     with open(path) as file_handler:
         return file_handler.readlines()
 
+def make_empty_diff_for_del_file(query, before_audit_hash, delete_file):
+    os.system("git reset --hard " + before_audit_hash)
+    xx = get_file_lines(delete_file)
+    result = "файл был удален\n" + query + '-'.join(xx)
+    return result
+
 #этот метод должен вызываться после перехода в папку с репозиторием
 def get_sol_files_names_from_diff(before_audit_hash, after_audit_hash):
     # создаем файлик со всеми именами файлов из diff'а
@@ -43,7 +49,6 @@ def get_sol_files_names_from_diff(before_audit_hash, after_audit_hash):
 
 
 def get_diff_as_string(before_audit_hash, after_audit_hash, file_name):
-    # функция возвращает разницу из файла(before_audit_hash, after_audit_hash) file_name в строковом виде
     tmp_names_file = "tmp_diff_file.txt"
     # file name should be declared  (file_name)
     os.system("git diff " + before_audit_hash + "^.." + after_audit_hash + " "  + file_name + " > " + tmp_names_file)
@@ -69,56 +74,67 @@ def get_sol_file_diff(before_audit_hash, after_audit_hash, file_name):
 #run only if this
 if __name__ == "__main__":
     #clone_repo("https://github.com/AugurProject/augur-core.git")
+
     #переходим в скачанную папку
     change_working_folder("tmp_repo")
     db_url = "github.com/AugurProject/augur-core.git"
     before_audit_hash = "45e1afb7eb1a895d923c97fe01e068c772c583ef"
     after_audit_hash = "3b5a63d372d205a0214e3061293d5bca0fd5636a"
     diff = 'diff'
+    os.system("rm -f .git/index.lock")
+    os.system("rm .git/index.lock")
+    mass = get_sol_files_names_from_diff(before_audit_hash, after_audit_hash)
 
-    for file_name in get_sol_files_names_from_diff(before_audit_hash, after_audit_hash):
-        # выводим на экран diff для одного файла (поэтому break и стоит)
-        #print(get_sol_file_diff(before_audit_hash, after_audit_hash, file_name))
-        #res = subprocess.call(["git", "diff", before_audit_hash + "^.." + after_audit_hash, file_name])
-        plus_minus_diff_for_a_line = get_diff_as_string(before_audit_hash, after_audit_hash, file_name)
-# строка с диффом хранится в одной переменной
-        print(plus_minus_diff_for_a_line)
-        break
-    '''
-    get_diff_as_string дает дифф для для файла
-     mb нужно разделить его (то есть полученну строку) на 2 файла с плюсиками и минусики
-     может быть, есть способ это сделать прямо из гита
-     если это можно сделать, то нужно разделить метод get_diff_as_string на 2 метода для получения двух различных строк
-      Это bудет удобно для дампа в базу.
-    '''
-
-        #Добавляем данные в таблицу
-        # cursor.execute(' INSERT INTO smart_contract_database VALUES("URL", "hash_before", "hash_after", "code_before", "code_after", "Difference")')
-    # 1-поле наименование файла .sol до, 2, 3 - содержимое файла до\после коммита, 4 - содержимое диффа + рисунок архитектуры
     conn = sqlite3.connect(
-            "C:/Users/Лада/PycharmProjects/nir_winter_2018/scripts/sqlitescripts/smart-contracts_database.db")  # или :memory: чтобы сохранить в RAM
+        "C:/Users/Лада/PycharmProjects/nir_winter_2018/scripts/sqlitescripts/smart-contracts_database.db")
     cursor = conn.cursor()
-    data1 = "github.com/AugurProject/augur-core.git"
-    data2 = "45e1afb7eb1a895d923c97fe01e068c772c583ef"
-    data3 = "3b5a63d372d205a0214e3061293d5bca0fd5636a"
-    data4 = plus_minus_diff_for_a_line
-    print(type(data4))
-    cursor.execute("INSERT INTO smart_contract_database VALUES (?, ?, ?, ?)", (data1, data2, data3, data4))
+
+    for file_name in mass:
+
+        # откат на старый коммит
+        os.system("git reset --hard " + before_audit_hash)
+
+        # считываем файл из старого коммита
+        try:
+            code_file_before = ''.join(get_file_lines(file_name))
+        except:
+            # файла может и не быть (он появился после первого коммита), тогда записываем пустую строку
+            code_file_before = ""
+
+        # перекатываемся в новый коммит
+        os.system("git reset --hard " + after_audit_hash)
+        try:
+            code_file_after = ''.join(get_file_lines(file_name))
+        except:
+            query = "diff --git " + before_audit_hash + " " + after_audit_hash
+            res = make_empty_diff_for_del_file(query, before_audit_hash, file_name)
+            print(res)
+            сс=input()
+            code_file_after = 'файл удален'
+
+
+        # считываем дельту
+        plus_minus_diff_for_a_line = get_diff_as_string(before_audit_hash, after_audit_hash, file_name)
+        data = (
+            file_name,
+            code_file_before,
+            code_file_after,
+            plus_minus_diff_for_a_line
+        )
+        #print(data)
+        cursor.execute("INSERT INTO smart_contract_database VALUES (?, ?, ?, ?)", data)
         # Записываем изменения
         # Разрываем соединение с базой
-    conn.commit()
+        conn.commit()
+
+        print(file_name)
+
     cursor.close()
     conn.close()
-
-
-     #c.close()
-    #con.close()
-    #res = subprocess.call(["git", "diff",  "--name-only", before_audit_hash + "^.." + after_audit_hash])
-
-
-
-
-
-    #change_working_folder("..")
-    #удаляем репозиторий
-    #delete_dir()
+    print("###")
+#         os.system("git checkout " + before_audit_hash)
+#
+#         plus_minus_diff_for_a_line = get_diff_as_string(before_audit_hash, after_audit_hash, file_name)
+# # строка с диффом хранится в одной переменной
+#         print(plus_minus_diff_for_a_line)
+        #break
