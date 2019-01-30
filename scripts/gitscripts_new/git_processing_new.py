@@ -32,7 +32,7 @@ def get_file_lines(path):
 def make_empty_diff_for_del_file(query, before_audit_hash, delete_file):
     os.system("git reset --hard " + before_audit_hash)
     xx = get_file_lines(delete_file)
-    result = "файл был удален\n" + query + '-'.join(xx)
+    result = "файл был удален\n" + query + '\n-' + '-'.join(xx)
     return result
 
 #этот метод должен вызываться после перехода в папку с репозиторием
@@ -77,19 +77,25 @@ if __name__ == "__main__":
 
     #переходим в скачанную папку
     change_working_folder("tmp_repo")
+
+    try:
+        os.remove(".git/index.lock")
+    except:
+        pass
+
+
     db_url = "github.com/AugurProject/augur-core.git"
     before_audit_hash = "45e1afb7eb1a895d923c97fe01e068c772c583ef"
     after_audit_hash = "3b5a63d372d205a0214e3061293d5bca0fd5636a"
     diff = 'diff'
-    os.system("rm -f .git/index.lock")
-    os.system("rm .git/index.lock")
+
     mass = get_sol_files_names_from_diff(before_audit_hash, after_audit_hash)
 
     conn = sqlite3.connect(
         "C:/Users/Лада/PycharmProjects/nir_winter_2018/scripts/sqlitescripts/smart-contracts_database.db")
     cursor = conn.cursor()
-
     for file_name in mass:
+        plus_minus_diff_for_a_line = None
 
         # откат на старый коммит
         os.system("git reset --hard " + before_audit_hash)
@@ -103,38 +109,37 @@ if __name__ == "__main__":
 
         # перекатываемся в новый коммит
         os.system("git reset --hard " + after_audit_hash)
+
+        # считываем файл из нового коммита
         try:
             code_file_after = ''.join(get_file_lines(file_name))
         except:
+            # файла может и не быть - удалили , поэтому там пустота
+            code_file_after = ""
+            # а в дельту записываем старый файл с "-"
             query = "diff --git " + before_audit_hash + " " + after_audit_hash
-            res = make_empty_diff_for_del_file(query, before_audit_hash, file_name)
-            print(res)
-            сс=input()
-            code_file_after = 'файл удален'
+            plus_minus_diff_for_a_line = make_empty_diff_for_del_file(query, before_audit_hash, file_name)
 
+        # если еще не считывали дельту, то считываем дельту
+        if not plus_minus_diff_for_a_line:
+            plus_minus_diff_for_a_line = get_diff_as_string(before_audit_hash, after_audit_hash, file_name)
 
-        # считываем дельту
-        plus_minus_diff_for_a_line = get_diff_as_string(before_audit_hash, after_audit_hash, file_name)
+        # если файла не было, но появился, то добавим к дельте уведомление
+        if code_file_before == "":
+            plus_minus_diff_for_a_line = "файл был создан\n" + plus_minus_diff_for_a_line
+
         data = (
             file_name,
             code_file_before,
             code_file_after,
             plus_minus_diff_for_a_line
         )
-        #print(data)
         cursor.execute("INSERT INTO smart_contract_database VALUES (?, ?, ?, ?)", data)
         # Записываем изменения
         # Разрываем соединение с базой
         conn.commit()
-
         print(file_name)
 
     cursor.close()
     conn.close()
-    print("###")
-#         os.system("git checkout " + before_audit_hash)
-#
-#         plus_minus_diff_for_a_line = get_diff_as_string(before_audit_hash, after_audit_hash, file_name)
-# # строка с диффом хранится в одной переменной
-#         print(plus_minus_diff_for_a_line)
-        #break
+    print("end")
